@@ -1,0 +1,11 @@
+Changes
+LICENSE
+MANIFEST
+META.yml
+Makefile.PL
+README
+lib/Finance/QBXML/QBOE.pm
+share/VeriSignClass3SecureServerCA.pem
+t/00.load.t
+t/release-pod-coverage.t
+t/release-pod-syntax.t
