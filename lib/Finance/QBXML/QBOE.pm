@@ -268,7 +268,7 @@ sub make_request
 
   my $rsp = $self->post_request($xmlOut);
 
-  croak "Unable to get session ticket: " . $rsp->status_line
+  croak "Request failed: " . $rsp->status_line
       unless $rsp->is_success;
 
   $self->_set_session_use_expiration(time() + $session_expire_after_use);
