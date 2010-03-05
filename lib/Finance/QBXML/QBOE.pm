@@ -29,6 +29,14 @@ use LWP::UserAgent;
 use Scalar::Util 'reftype';
 #use Smart::Comments '###';
 
+=head1 DEPENDENCIES
+
+Finance::QBXML::QBOE requires L<Finance::QBXML>, L<File::ShareDir>,
+L<LWP::UserAgent>, and L<Net::SSL>.  These are all available from
+CPAN.
+
+=cut
+
 #=====================================================================
 # Package Global Variables:
 
@@ -133,6 +141,19 @@ sub _build_ua
   require Net::HTTPS;
   croak "You must use Net::SSL with LWP in order to validate certificates"
       unless $Net::HTTPS::SSL_SOCKET_CLASS eq 'Net::SSL';
+
+=diag C<< You must use Net::SSL with LWP in order to validate certificates >>
+
+LWP can normally use either Net::SSL or IO::Socket::SSL to handle
+HTTPS connections, but Finance::QBXML::QBOE requires you to use
+Net::SSL in order to properly validate the server's certificate and
+provide the client certificate required by QBOE.
+
+=diag C<< No hostname in URL: %s >>
+
+You specified an invalid URL for the L</url> attribute.
+
+=cut
 
   $self->url =~ m!^https://([^/:]+)/!
       or confess "No hostname in URL: " . $self->url;
@@ -285,6 +306,10 @@ C<set_session> later.
 A session ticket normally expires 1 hour after its last use, or
 24 hours after it was first issued, whichever comes first.
 
+=diag C<< Invalid session ticket >>
+
+You tried to pass an empty session ticket to L</set_session>.
+
 =cut
 
 sub set_session
@@ -328,6 +353,15 @@ the L</connection_ticket> to QBOE and requests a session ticket.
 
 It throws an exception if it is unable to acquire a sesion ticket for
 any reason.
+
+=diag C<< The connection_ticket has not been set >>
+
+You called L</make_request> (or L</acquire_sesion>) before setting
+the L</connection_ticket>.
+
+=diag C<< Unable to get session ticket: %s >>
+
+An error occured while trying to acquire a session ticket.
 
 =cut
 
@@ -404,6 +438,10 @@ is no current session, it calls L</acquire_sesion> first.)
 
 As a shortcut, passing an arrayref as C<$request> is equivalent to passing
 C<< { QBXMLMsgsRq => $request } >>.
+
+=diag C<< Request failed: %s >>
+
+An error occured while trying to read the response from the server.
 
 =cut
 
