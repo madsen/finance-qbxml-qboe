@@ -43,12 +43,47 @@ our $session_expire_after_use   =  1 * 60 * 60 - 10;
 #---------------------------------------------------------------------
 # Inherited attributes:
 
+=attr-in version
+
+Finance::QBXML::QBOE changes the default value for Finance::QBXML's
+C<version> attribute to C<6.0>, because that's the higest version
+currently supported by QuickBooks Online Edition.
+
+=cut
+
 has '+version' => (
   default => '6.0',             # Maximum currently supported by QBOE
 );
 
 #---------------------------------------------------------------------
 # HTTPS attributes:
+
+=attr-http url
+
+The URL of the QBOE gateway
+(default L<https://webapps.quickbooks.com/j/AppGateway>).
+
+=attr-http cert_file
+
+The path of the file containing the client certificate.  Required.
+
+=attr-http key_file
+
+The path of the file containing the client's private key.  Required.
+
+=attr-http ca_file
+
+The path of the file containing the certificate authority's signing
+certificate (defaults to the copy of F<VeriSignClass3SecureServerCA.pem>
+included with this module).
+
+=attr-http ua
+
+The L<LWP::UserAgent> to use for the connection.  The default is to
+create a new UserAgent and set it to perform certificate validation.
+You shouldn't override the default unless you know what you're doing.
+
+=cut
 
 has url => (
   is      => 'ro',
@@ -115,6 +150,42 @@ sub _build_ua
 #---------------------------------------------------------------------
 # Session attributes:
 
+=attr-sess session_ticket
+
+The current session ticket, if any.  You can clear this with the
+L</clear_session> method, or set it with the L</set_session> method.
+
+=method clear_session
+
+  $qb->clear_session
+
+Clears out any existing session information.  The next request will
+open a new session.
+
+=attr-sess connection_ticket
+
+The current connection ticket, if any.  This attribute is read/write,
+and setting it automatically clears any existing session.
+
+=attr-sess session_issue_expiration
+
+The time at which the session should be considered expired based on
+the time it was originally issued.
+
+=attr-sess session_use_expiration
+
+The time at which the session should be considered expired based on
+the last time it was used.
+
+=method session_expiration
+
+  $time = $qb->session_expiration
+
+This returns the smaller of L</session_issue_expiration> and
+L</session_use_expiration>.
+
+=cut
+
 has session_ticket => (
   is       => 'ro',
   isa      => Str,
@@ -151,6 +222,24 @@ sub session_expiration
 #---------------------------------------------------------------------
 # Application attributes:
 
+=attr-app application_login
+
+This is your C<ApplicationLogin> for QBOE.  Required.
+
+=attr-app app_id
+
+This is your C<AppID> for QBOE.  Required.
+
+=attr-app app_ver
+
+This is your C<AppVer> for QBOE (default 1).
+
+=attr-app language
+
+This is your C<Language> for QBOE (default C<English>).
+
+=cut
+
 has application_login => (
   is       => 'ro',
   isa      => Str,
@@ -174,8 +263,30 @@ has language => (
   isa      => Str,
   default  => 'English',
 );
-
 #---------------------------------------------------------------------
+
+=method set_session
+
+  $qb->set_session($session_ticket, $issue_exp, $use_exp)
+
+You can use this method to provide a session ticket for QBOE.  If
+either C<$issue_exp> or C<$use_exp> is omitted or C<undef>, the value
+will be calculated based on the current time.
+
+C<$session_ticket> is assigned to the L</session_ticket> attribute,
+C<$issue_exp> to L</session_issue_expiration>, and C<$use_exp> to
+L</session_use_expiration>.
+
+You don't normally need to use this method, as the automatic session
+management will call it for you.  But if you want to save a session
+ticket for later, just store those 3 attributes and return them to
+C<set_session> later.
+
+A session ticket normally expires 1 hour after its last use, or
+24 hours after it was first issued, whichever comes first.
+
+=cut
+
 sub set_session
 {
   my ($self, $ticket, $issue, $use) = @_;
@@ -191,6 +302,15 @@ sub set_session
 } # end set_session
 #---------------------------------------------------------------------
 
+=method valid_session
+
+  $is_valid = $qb->valid_session
+
+Returns true if the L</session_ticket> is set and has not yet expired,
+false otherwise.
+
+=cut
+
 sub valid_session
 {
   my $self = shift;
@@ -199,6 +319,18 @@ sub valid_session
 } # end valid_session
 #---------------------------------------------------------------------
 
+=method acquire_sesion
+
+  $qb->acquire_sesion
+
+This method is normally called automatically when needed.  It sends
+the L</connection_ticket> to QBOE and requests a session ticket.
+
+It throws an exception if it is unable to acquire a sesion ticket for
+any reason.
+
+=cut
+
 sub acquire_sesion
 {
   my $self = shift;
@@ -206,7 +338,8 @@ sub acquire_sesion
   my $xmlOut = $self->format_XML({SignonMsgsRq => {SignonAppCertRq => {
     ClientDateTime   => $self->time2iso,
     ApplicationLogin => $self->application_login,
-    ConnectionTicket => $self->connection_ticket,
+    ConnectionTicket => $self->connection_ticket
+      || croak "The connection_ticket has not been set",
     Language         => $self->language,
     AppID            => $self->app_id,
     AppVer           => $self->app_ver,
@@ -224,6 +357,16 @@ sub acquire_sesion
   );
 } # end acquire_sesion
 #---------------------------------------------------------------------
+
+=method post_request
+
+  $rsp = $qb->post_request($xml)
+
+This is the low-level function that posts a qbXML message to the QBOE
+server and returns a L<HTTP::Response>.  You wouldn't normally call it
+directly.
+
+=cut
 
 sub post_request
 {
@@ -243,6 +386,26 @@ sub post_request
   $rsp;
 } # end post_request
 #---------------------------------------------------------------------
+
+=method make_request
+
+  $response = $qb->make_request($request)
+
+This is the primary method provided by Finance::QBXML::QBOE.  It takes
+a data structure representing a qbXML request (something that would be
+accepted by L<Finance::QBXML/format_XML>), converts it to XML, sends
+that to QBOE, and parses the response, returning a hashref
+representing the qbXML response.  It also updates the
+L</session_use_expiration> attribute.
+
+If C<$request> does not contain a C<SignonMsgsRq> element, one is
+automatically added using the current session information.  (If there
+is no current session, it calls L</acquire_sesion> first.)
+
+As a shortcut, passing an arrayref as C<$request> is equivalent to passing
+C<< { QBXMLMsgsRq => $request } >>.
+
+=cut
 
 sub make_request
 {
@@ -284,3 +447,57 @@ __PACKAGE__->meta->make_immutable;
 1;
 
 __END__
+
+=head1 SYNOPSIS
+
+    use Finance::QBXML::QBOE;
+
+    my $qb = Finance::QBXML->new(
+      application_login => 'abc', app_id => 1234,
+      cert_file => 'client.crt', key_file => 'client.key',
+      connection_ticket => 'xyz',
+    );
+
+    my $rsp = $qb->make_request([{ _tag => 'CompanyQueryRq' }]);
+
+
+=head1 DESCRIPTION
+
+Finance::QBXML::QBOE extends L<Finance::QBXML> with methods to
+interface with QuickBooks Online Edition
+(L<http://quickbooksonline.intuit.com>), including automatic session
+management.
+
+You just construct a Finance::QBXML::QBOE object, giving it the
+connection ticket, and call the L</make_request> method.  The object
+will acquire a sesion ticket as necessary, and convert to and from
+qbXML automatically.
+
+=for Pod::Loom-sort_method
+new
+
+=method new
+
+  $qb = Finance::QBXML::QBOE->new(
+    application_login => 'abc', app_id => 1234,
+    cert_file => 'client.crt', key_file => 'client.key', ...
+  );
+
+This is the standard L<Moose|Moose::Object> constructor.
+
+=begin Pod::Loom-group_attr in
+
+=head2 Inherited Attributes
+
+=begin Pod::Loom-group_attr app
+
+=head2 Application Attributes
+
+=begin Pod::Loom-group_attr http
+
+=head2 HTTPS Attributes
+
+=begin Pod::Loom-group_attr sess
+
+=head2 Session Management Attributes
+
